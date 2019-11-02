@@ -1,5 +1,6 @@
 import random
 import pygame
+import neat
 
 FLOOR = 730
 WIN_WIDTH = 600
@@ -18,8 +19,6 @@ base_img = pygame.transform.scale2x(pygame.image.load(join('imgs','base.png')).c
 pygame.font.init()
 STAT_FONT = pygame.font.SysFont("comicsans", 50)
 END_FONT = pygame.font.SysFont("comicsans", 70)
-
-gen = 0
 
 class Bird:
 	''' 
@@ -46,6 +45,7 @@ class Bird:
 		self.img_count = 0
 		self.img = self.IMGS[0]
 		self.img_height = self.img.get_height()
+		self.img_width = self.img.get_width()
 
 	def jump(self):
 		'''
@@ -174,8 +174,8 @@ class Pipe:
 		bird_mask = bird.get_mask()
 		top_mask = pygame.mask.from_surface(self.TOP_PIPE)
 		bottom_mask = pygame.mask.from_surface(self.BOTTOM_PIPE)
-		top_offset = (self.pos_x - bird.x, self.top - round(bird.y))
-		bottom_offset = (self.pos_x - bird.x, self.bottom - round(bird.y))
+		top_offset = (self.pos_x - bird.pos_x, self.top - round(bird.pos_y))
+		bottom_offset = (self.pos_x - bird.pos_x, self.bottom - round(bird.pos_y))
 
 		b_point = bird_mask.overlap(bottom_mask, bottom_offset)
 		t_point = bird_mask.overlap(top_mask,top_offset)
@@ -243,133 +243,8 @@ def blitRotateCenter(surf, image, topleft, angle):
 
 	surf.blit(rotated_image, new_rect.topleft)
 
-# UNUSED
-def eval_genomes(genomes, config):
-	'''
-	runs the simulation of the current population of
-	birds and sets their fitness based on the distance they
-	reach in the game.
-	'''
-	global WIN, gen
-	win = WIN
-	gen += 1
 
-	# start by creating lists holding the genome itself, the
-	# neural network associated with the genome and the
-	# bird object that uses that network to play
-	nets = []
-	birds = []
-	ge = []
-	for genome_id, genome in genomes:
-		genome.fitness = 0  # start with fitness level of 0
-		net = neat.nn.FeedForwardNetwork.create(genome, config)
-		nets.append(net)
-		birds.append(Bird(230,350))
-		ge.append(genome)
-
-	base = Base(FLOOR)
-	pipes = [Pipe(700)]
-	score = 0
-
-	clock = pygame.time.Clock()
-
-	run = True
-	while run and len(birds) > 0:
-		clock.tick(30)
-
-		for event in pygame.event.get():
-			if event.type == pygame.QUIT:
-				run = False
-				pygame.quit()
-				quit()
-				break
-
-		pipe_ind = 0
-		if len(birds) > 0:
-			if len(pipes) > 1 and birds[0].x > pipes[0].x + pipes[0].TOP_PIPE.get_width():  # determine whether to use the first or second
-				pipe_ind = 1																 # pipe on the screen for neural network input
-
-		for x, bird in enumerate(birds):  # give each bird a fitness of 0.1 for each frame it stays alive
-			ge[x].fitness += 0.1
-			bird.move()
-
-			# send bird location, top pipe location and bottom pipe location and determine from network whether to jump or not
-			output = nets[birds.index(bird)].activate((bird.y, abs(bird.y - pipes[pipe_ind].height), abs(bird.y - pipes[pipe_ind].bottom)))
-
-			if output[0] > 0.5:  # we use a tanh activation function so result will be between -1 and 1. if over 0.5 jump
-				bird.jump()
-
-		base.move()
-
-		rem = []
-		add_pipe = False
-		for pipe in pipes:
-			pipe.move()
-			# check for collision
-			for bird in birds:
-				if pipe.collide(bird, win):
-					ge[birds.index(bird)].fitness -= 1
-					nets.pop(birds.index(bird))
-					ge.pop(birds.index(bird))
-					birds.pop(birds.index(bird))
-
-			if pipe.x + pipe.TOP_PIPE.get_width() < 0:
-				rem.append(pipe)
-
-			if not pipe.passed and pipe.x < bird.x:
-				pipe.passed = True
-				add_pipe = True
-
-		if add_pipe:
-			score += 1
-			# can add this line to give more reward for passing through a pipe (not required)
-			for genome in ge:
-				genome.fitness += 5
-			pipes.append(Pipe(WIN_WIDTH))
-
-		for r in rem:
-			pipes.remove(r)
-
-		for bird in birds:
-			if bird.y + bird.img.get_height() - 10 >= FLOOR or bird.y < -50:
-				nets.pop(birds.index(bird))
-				ge.pop(birds.index(bird))
-				birds.pop(birds.index(bird))
-
-		draw_window(WIN, birds, pipes, base, score, gen, pipe_ind)
-
-		# break if score gets large enough
-		'''if score > 20:
-			pickle.dump(nets[0],open('best.pickle', 'wb'))
-			break'''
-
-def run(config_file):
-	'''
-	runs the NEAT algorithm to train a neural network to play flappy bird.
-	:param config_file: location of config file
-	:return: None
-	'''
-	config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction,
-						 neat.DefaultSpeciesSet, neat.DefaultStagnation,
-						 config_file)
-
-	# Create the population, which is the top-level object for a NEAT run.
-	p = neat.Population(config)
-
-	# Add a stdout reporter to show progress in the terminal.
-	p.add_reporter(neat.StdOutReporter(True))
-	stats = neat.StatisticsReporter()
-	p.add_reporter(stats)
-	#p.add_reporter(neat.Checkpointer(5))
-
-	# Run for up to 50 generations.
-	winner = p.run(eval_genomes, 50)
-
-	# show final stats
-	print('\nBest genome:\n{!s}'.format(winner))
-
-
-def draw_window(win, bird, pipes, base, score):
+def draw_window(win, birds, pipes, base, score, gen, pipe_ind):
 	'''
 	draws the windows for the main game loop
 	:param win: pygame window surface
@@ -381,44 +256,57 @@ def draw_window(win, bird, pipes, base, score):
 	:return: None
 	'''
 
-	# if gen == 0:
-	# 	gen = 1
 	win.blit(bg_img, (0,0))
 
 	for pipe in pipes:
 		pipe.draw(win)
 
 	base.draw(win)
-	bird.draw(win)
-	# for bird in birds:
-	# 	# draw lines from bird to pipe
-	# 	if DRAW_LINES:
-	# 		try:
-	# 			pygame.draw.line(win, (255,0,0), (bird.x+bird.img.get_width()/2, bird.y + bird.img.get_height()/2), (pipes[pipe_ind].x + pipes[pipe_ind].TOP_PIPE.get_width()/2, pipes[pipe_ind].height), 5)
-	# 			pygame.draw.line(win, (255,0,0), (bird.x+bird.img.get_width()/2, bird.y + bird.img.get_height()/2), (pipes[pipe_ind].x + pipes[pipe_ind].BOTTOM_PIPE.get_width()/2, pipes[pipe_ind].bottom), 5)
-	# 		except:
-	# 			pass
-	# 	# draw bird
-	# 	bird.draw(win)
+	# bird.draw(win)
+	for bird in birds:
+		# draw lines from bird to pipe
+		if DRAW_LINES:
+			try:
+				pygame.draw.line(win, (255,0,0), (bird.x+bird.img_width/2, bird.y + bird.img_height/2), (pipes[pipe_ind].x + pipes[pipe_ind].pipe.width/2, pipes[pipe_ind].height), 5)
+				pygame.draw.line(win, (255,0,0), (bird.x+bird.img_width/2, bird.y + bird.img_height/2), (pipes[pipe_ind].x + pipes[pipe_ind].pipe.width/2, pipes[pipe_ind].bottom), 5)
+			except:
+				pass
+		# draw bird
+		bird.draw(win)
 
 	# score
 	score_label = STAT_FONT.render('Score: ' + str(score),1,(255,255,255))
 	win.blit(score_label, (WIN_WIDTH - score_label.get_width() - 15, 10))
 
-	# # generations
-	# score_label = STAT_FONT.render('Gens: ' + str(gen-1),1,(255,255,255))
-	# win.blit(score_label, (10, 10))
+	# generations
+	score_label = STAT_FONT.render('Gens: ' + str(gen-1),1,(255,255,255))
+	win.blit(score_label, (10, 10))
 
-	# # alive
-	# score_label = STAT_FONT.render('Alive: ' + str(len(birds)),1,(255,255,255))
-	# win.blit(score_label, (10, 50))
+	# alive
+	score_label = STAT_FONT.render('Alive: ' + str(len(birds)),1,(255,255,255))
+	win.blit(score_label, (10, 50))
 
 	pygame.display.update()	
 
 
-def run_game():
+GEN = 0
+def run_game(genomes, config):
+	global GEN 
+
+	GEN += 1
+	nets = []
+	birds = []
+	ge = []
+	for _, genome in genomes:
+		genome.fitness = 0  # start with fitness level of 0
+		net = neat.nn.FeedForwardNetwork.create(genome, config)
+		nets.append(net)
+		birds.append(Bird(230,350))
+		ge.append(genome)
+
+
 	clock = pygame.time.Clock()
-	bird = Bird(230,350)
+	# bird = Bird(230,350)
 	pipes = [Pipe(700)]
 	base = Base(FLOOR)
 	win = WIN
@@ -426,27 +314,48 @@ def run_game():
 
 	# Main game while loop
 	while True:
-		clock.tick(30)
+		# clock.tick(30)
 
 		for event in pygame.event.get():
-			# Jump upon user's input
-			if event.type == pygame.KEYDOWN:
-				if event.key == pygame.K_SPACE:
-					bird.jump()
-			# Terminates the game
 			if event.type == pygame.QUIT:
 				pygame.quit()
 				quit()
 				break
 
+
+		pipe_ind = 0
+		if len(birds) > 0:
+			if len(pipes) > 1 and birds[0].pos_x > pipes[0].pos_x + pipes[0].width:  # determine whether to use the first or second
+				pipe_ind = 1
+		else:
+			break															 # pipe on the screen for neural network input
+
+		for x, bird in enumerate(birds):  # give each bird a fitness of 0.1 for each frame it stays alive
+			ge[x].fitness += 0.1
+			bird.move()
+
+			# send bird location, top pipe location and bottom pipe location and determine from network whether to jump or not
+			output = nets[birds.index(bird)].activate((bird.pos_y, abs(bird.pos_y - pipes[pipe_ind].height), abs(bird.pos_y - pipes[pipe_ind].bottom)))
+
+			if output[0] > 0.5:  # we use a tanh activation function so result will be between -1 and 1. if over 0.5 jump
+				bird.jump()
+
 		base.move()
-		bird.move()
+		# bird.move()
+
 
 		for pipe in pipes:
 			pipe.move()
+			for bird in birds:
+				if pipe.collide(bird, win):
+					ge[birds.index(bird)].fitness -= 1
+					nets.pop(birds.index(bird))
+					ge.pop(birds.index(bird))
+					birds.pop(birds.index(bird))
 			# if pipe.collide(bird, win):
-				# quit()
-				# pass
+			# 	genome.fitness -= 1
+			# 	# quit()
+			# 	# pass
 
 			# Remove TOP & BOTTOM pipe when they disapear from screen
 			if pipe.pos_x + pipe.width < 0:
@@ -456,11 +365,48 @@ def run_game():
 			# Switch pipe.render to false so only one pipe is generated
 			if pipe.render and pipe.pos_x < bird.pos_x:
 				pipe.render = False
+				for genome in ge:
+					genome.fitness += 1
+				# genome.fitness += 5
 				score += 1
 				pipes.append(Pipe(WIN_WIDTH))
 
 		# Check if bird collides with base and/or is out of window size
-		if base.collide(bird):
-			break
+		for bird in birds:
+			if base.collide(bird):
+				nets.pop(birds.index(bird))
+				ge.pop(birds.index(bird))
+				birds.pop(birds.index(bird))
 
-		draw_window(win, bird, pipes, base, score)
+		draw_window(win, birds, pipes, base, score, GEN, pipe_ind)
+
+
+		# break if score gets large enough
+		'''if score > 20:
+			pickle.dump(nets[0],open('best.pickle', 'wb'))
+			break'''
+
+
+def neat_configure(config_path):
+	'''
+	runs the NEAT algorithm to train a neural network to play flappy bird.
+	:param config_file: location of config file
+	:return: None
+	'''
+	config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction,
+						 neat.DefaultSpeciesSet, neat.DefaultStagnation,
+						 config_path)
+
+	# Create the population, which is the top-level object for a NEAT run.
+	population = neat.Population(config)
+
+	# Add a stdout reporter to show progress in the terminal.
+	population.add_reporter(neat.StdOutReporter(True))
+	population.add_reporter(neat.StatisticsReporter())
+	#population.add_reporter(neat.Checkpointer(5))
+
+	# Run for up to 50 generations.
+	winner = population.run(run_game, 50)
+
+	# show final stats
+	print('\nBest genome:\n{!s}'.format(winner))

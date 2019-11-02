@@ -1,9 +1,8 @@
-from bird import run_game
-
-# if __name__ == '__main__':
-# 	main()
+from bird import neat_configure
 
 if __name__ == '__main__':
-	run_game()
+	config_path = 'config.txt'
+	neat_configure(config_path)
+	# run_game()
 
 	
